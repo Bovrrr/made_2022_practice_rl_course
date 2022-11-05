@@ -1,15 +1,21 @@
-from gym import make
 import os
+import random
+import copy
+from collections import deque
+
 import numpy as np
+
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.optim import Adam, lr_scheduler
-from collections import deque
-import random
-import copy
 
+from gym import make
+
+# CONSTANTS
 GAMMA = 0.99
+BETTA = 1
+ALPHA = 1
 INITIAL_STEPS = 1024
 TRANSITIONS = int(1e5) * 12
 STEPS_PER_UPDATE = 4
@@ -18,6 +24,7 @@ BATCH_SIZE = 128
 BUFFER_SIZE = int(2**7) * int(1e3)
 LEARNING_RATE = 5e-4
 
+# SEED FIXING, DEVICE DETERMINING
 DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 SEED = 0
 np.random.seed(SEED)
@@ -47,7 +54,7 @@ class MyModel(nn.Module):
         for i in range(len(self.lin_dim_list) - 1):
             layers.append(nn.Linear(self.lin_dim_list[i], self.lin_dim_list[i + 1]))
             layers.append(nn.ReLU())
-            layers.append(nn.BatchNorm1d(self.lin_dim_list[i + 1]))
+            # layers.append(nn.BatchNorm1d(self.lin_dim_list[i + 1]))
 
         layers.append(nn.Linear(lin_dim_list[-1], action_dim))
         self.fcnn = nn.Sequential(*layers)
@@ -62,18 +69,10 @@ class MyModel(nn.Module):
             nn.init.xavier_uniform_(layer.weight)
 
 
-# class ExpReplay(deque):
-#     def sample(self, size):
-#         batch = random.sample(self, size)
-#         return list(zip(*batch))
-
-
 class Buffer:
     def __init__(self, maxlen):
         self.buf = deque(maxlen=maxlen)
-        self.buf_last_edit = 0
         self.buf_weights = deque(maxlen=maxlen)
-        self.buf_weights_last_edit = 0
 
 
 class DQN:
@@ -85,10 +84,9 @@ class DQN:
         self.target_model.load_state_dict(self.model.state_dict())
 
         self.buffer = Buffer(maxlen=BUFFER_SIZE)
-        self.buf_weight = nn.MSELoss(reduce=False)
 
         self.optimizer = Adam(self.model.parameters(), lr=LEARNING_RATE)
-        self.criteria = nn.MSELoss()
+        self.criteria = nn.MSELoss(reduce=False)
         self.scheduler = lr_scheduler.StepLR(
             self.optimizer,
             step_size=int(1e4),
@@ -99,65 +97,49 @@ class DQN:
         # Add transition to a replay buffer.
         # Hint: use deque with specified maxlen. It will remove old experience automatically.
         self.buffer.buf.append(transition)
-        self.buffer.buf_last_edit += 1
+
+        # разворачиваем размерности
+        batch = list(zip(*[transition]))
+        state, action, next_state, reward, done = batch
+        # оборачиваю всё в тензоры
+        state = torch.tensor(np.array(state, dtype=np.float32))
+        action = torch.tensor(np.array(action, dtype=np.int64))
+        next_state = torch.tensor(np.array(next_state, dtype=np.float32))
+        reward = torch.tensor(np.array(reward, dtype=np.float32))
+        done = torch.tensor(np.array(done, dtype=np.int32))
+
+        # делаю предикт моделью и таргет моделью
+
+        current_q_value = (
+            self.model(state.to(DEVICE))
+            .gather(1, action.unsqueeze(1).to(DEVICE))
+            .squeeze(1)
+        )
+        target_next_q_value = (
+            self.target_model(next_state.to(DEVICE)).max(dim=1)[0].detach()
+        )
+        reward = reward.to(DEVICE)
+        done = done.to(DEVICE)
+        q_expected = reward + GAMMA * target_next_q_value * (1 - done)
+        # считаю ошибки - веса для семплирования
+        weights = [
+            val.item()
+            for val in self.criteria(current_q_value, q_expected).detach().flatten()
+        ]
+        self.buffer.buf_weights.extend(weights)
 
     def sample_batch(self):
         # Sample batch from a replay buffer.
         # Hints:
         # 1. Use random.randint
         # 2. Turn your batch into a numpy.array before turning it to a Tensor. It will work faster
-        # взяли батч из буффера
-        if self.buffer.buf_last_edit > self.buffer.buf_weights_last_edit:
-            diff = self.buffer.buf_last_edit - self.buffer.buf_weights_last_edit
-            batch = None
-            if len(self.buffer.buf) == diff:
-                batch = list(self.buffer.buf)
-            else:
-                batch = list(self.buffer.buf)[:-diff]
-            # print(f"diff={diff}")
-            # print(f"len buf={len(self.buffer.buf)}")
-            # print(f"batch={batch}")
-            # print(len(batch), len(batch[0]))
-            batch = list(zip(*batch))
-            # print(len(batch), len(batch[0]))
-            state, action, next_state, reward, done = batch
 
-            # оборачиваю всё в тензоры
-            state = torch.tensor(np.array(state, dtype=np.float32))
-            action = torch.tensor(np.array(action, dtype=np.int64))
-            next_state = torch.tensor(np.array(next_state, dtype=np.float32))
-            reward = torch.tensor(np.array(reward, dtype=np.float32))
-            done = torch.tensor(np.array(done, dtype=np.int32))
-
-            # делаю предикт моделью и таргет моделью
-            current_q_value = (
-                self.model(state.to(DEVICE))
-                .gather(1, action.unsqueeze(1).to(DEVICE))
-                .squeeze(1)
-            )
-            target_next_q_value = (
-                self.target_model(next_state.to(DEVICE)).max(dim=1)[0].detach()
-            )
-            reward = reward.to(DEVICE)
-            done = done.to(DEVICE)
-            q_expected = reward + GAMMA * target_next_q_value * (1 - done)
-            # считаю ошибки - веса для семплирования
-            weights = [
-                val.item()
-                for val in self.buf_weight(current_q_value, q_expected)
-                .detach()
-                .flatten()
-            ]
-            self.buffer.buf_weights.extend(weights)
-            self.buffer.buf_weights_last_edit += len(weights)
-
-        # разложили его по компонентам
-        # print(f"размерность={np.array(self.buffer.buf).shape}")
-        # print(f"1 {list(range(len(self.buffer.buf)))}")
         w = np.array(list(self.buffer.buf_weights))
+        w = w**ALPHA
         w = w / w.sum()
-        # print(f"2 {w}")
-        print(len(self.buffer.buf), w.size)
+        w = (BUFFER_SIZE * w) ** (-BETTA)
+        w = w / w.max()
+        w = w / w.sum()
         idxs = np.random.choice(list(range(len(self.buffer.buf))), size=BATCH_SIZE, p=w)
         del w
         # print(f"idxs={idxs}")
@@ -194,7 +176,7 @@ class DQN:
         q_expected = reward + GAMMA * target_next_q_value * (1 - done)
 
         self.optimizer.zero_grad()
-        loss = self.criteria(current_q_value, q_expected)
+        loss = self.criteria(current_q_value, q_expected).mean()
         loss.backward()
         self.optimizer.step()
 
