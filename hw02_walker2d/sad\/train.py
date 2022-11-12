@@ -34,9 +34,9 @@ ACTOR_LR = 2e-4
 CRITIC_LR = 1e-4
 
 CLIP = 0.2
-ENTROPY_COEF = 1.25e-2
-BATCHES_PER_UPDATE = 48
-BATCH_SIZE = int(2**8)
+ENTROPY_COEF = 2e-2
+BATCHES_PER_UPDATE = 64
+BATCH_SIZE = int(2**9)
 
 MIN_TRANSITIONS_PER_UPDATE = 2048
 MIN_EPISODES_PER_UPDATE = 4
@@ -172,9 +172,9 @@ class PPO:
 
             self.actor_optim.zero_grad()
             loss_actor_explo.backward()
-            nn.utils.clip_grad_norm_(
-                self.actor.model.parameters(), CLIP_VALUE, norm_type=2
-            )
+            #   nn.utils.clip_grad_norm_(
+            #       self.actor.model.parameters(), CLIP_VALUE, norm_type=2
+            #   )
             self.actor_optim.step()
 
             # TODO: Update critic here
@@ -183,9 +183,9 @@ class PPO:
 
             self.critic_optim.zero_grad()
             loss_critic.backward()
-            nn.utils.clip_grad_norm_(
-                self.critic.model.parameters(), CLIP_VALUE, norm_type=2
-            )
+            # nn.utils.clip_grad_norm_(
+            #     self.critic.model.parameters(), CLIP_VALUE, norm_type=2
+            # )
             self.critic_optim.step()
 
     def get_value(self, state):
