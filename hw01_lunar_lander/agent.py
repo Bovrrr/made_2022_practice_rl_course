@@ -1,11 +1,10 @@
-from pydoc import classname
 import random
 import numpy as np
 from torch import nn
 import os
 import torch
 
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SEED = 0
 np.random.seed(SEED)
 random.seed(SEED)

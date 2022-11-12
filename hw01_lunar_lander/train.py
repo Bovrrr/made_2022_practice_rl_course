@@ -13,19 +13,20 @@ from torch.optim import Adam, lr_scheduler
 from gym import make
 
 # CONSTANTS
-GAMMA = 0.99
+GAMMA = 0.90  # 0.99
 BETTA = 1
 ALPHA = 1
 INITIAL_STEPS = 1024
 TRANSITIONS = int(1e5) * 12
 STEPS_PER_UPDATE = 4
-STEPS_PER_TARGET_UPDATE = STEPS_PER_UPDATE * 1000
-BATCH_SIZE = 128
+STEPS_PER_TARGET_UPDATE = STEPS_PER_UPDATE * 1000 * 2
+BATCH_SIZE = int(2**6)
 BUFFER_SIZE = int(2**7) * int(1e3)
-LEARNING_RATE = 5e-4
+LEARNING_RATE = 4e-3  # 5e-4
 
 # SEED FIXING, DEVICE DETERMINING
-DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+# DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+DEVICE = torch.device("cpu")
 SEED = 0
 np.random.seed(SEED)
 random.seed(SEED)
@@ -44,8 +45,9 @@ class MyModel(nn.Module):
         state_dim,
         action_dim,
         lin_dim_list=[
-            int(2**9),
+            int(2**7),
             int(2**8),
+            int(2**7),
         ],
     ):
         super().__init__()
@@ -243,7 +245,7 @@ if __name__ == "__main__":
     for _ in range(INITIAL_STEPS):
         action = env.action_space.sample()
 
-        next_state, reward, done, _ = env.step(action)
+        next_state, reward, done, *_ = env.step(action)
         dqn.consume_transition((state, action, next_state, reward, done))
 
         state = next_state if not done else env.reset()
