@@ -2,15 +2,27 @@ import random
 import numpy as np
 import os
 import torch
+import torch.nn as nn
 
 
-class Agent:
+class Agent(nn.Module):
     def __init__(self):
-        self.model = torch.load(__file__[:-8] + "/agent.pkl")
+        super().__init__()
+        self.model = nn.Sequential(
+            nn.Linear(28, 256),
+            nn.ELU(),
+            nn.Linear(256, 256),
+            nn.ELU(),
+            nn.Linear(256, 8),
+            nn.Tanh(),
+        )
+        state_dict = torch.load(__file__[:-8] + "/agent.pkl")
+        self.load_state_dict(state_dict)
 
     def act(self, state):
-        state = torch.tensor(np.array(state))
-        return 0  # TODO
+        with torch.no_grad():
+            state = torch.tensor(np.array([state])).float()
+            return self.model(state).cpu().numpy()[0]
 
     def reset(self):
         pass
